@@ -66,6 +66,7 @@ terraform apply -var-file="environments/dev/terraform.tfvars"
 | Secret | Description |
 |--------|-------------|
 | `GCP_WIF_PROVIDER` | Workload Identity Federation provider resource name |
+| | Example: `projects/568842450714/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
 | `GCP_SERVICE_ACCOUNT` | SA email used by GitHub Actions |
 | `TF_STATE_BUCKET` | GCS bucket name for remote state |
 | `JWT_SECRET` | JWT signing key value |
