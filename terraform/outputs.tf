@@ -38,3 +38,18 @@ output "jwt_secret_id" {
   description = "Secret Manager secret ID for JWT signing key"
   value       = module.secrets.jwt_secret_id
 }
+
+output "wif_pool_name" {
+  description = "Workload Identity Pool name"
+  value       = module.iam.wif_pool_name
+}
+
+output "wif_provider_name" {
+  description = "Workload Identity Provider name"
+  value       = module.iam.wif_provider_name
+}
+
+output "github_sa_email" {
+  description = "GitHub Actions service account email"
+  value       = module.iam.github_sa_email
+}
