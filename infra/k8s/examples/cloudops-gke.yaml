@@ -1,0 +1,281 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cloudops-dev
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudops-jwt
+  namespace: cloudops-dev
+type: Opaque
+stringData:
+  JWT_SECRET: replace-with-a-real-secret
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: task-service
+  namespace: cloudops-dev
+  annotations:
+    iam.gke.io/gcp-service-account: task-service@YOUR_PROJECT.iam.gserviceaccount.com
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-service
+  namespace: cloudops-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: task-service
+  template:
+    metadata:
+      labels:
+        app: task-service
+    spec:
+      serviceAccountName: task-service
+      containers:
+        - name: task-service
+          image: us-central1-docker.pkg.dev/YOUR_PROJECT/cloudops/task-service:latest
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: gcp
+            - name: GCP_PROJECT_ID
+              value: YOUR_PROJECT
+            - name: PUBSUB_TOPIC_TASK_EVENTS
+              value: task-events
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-service
+  namespace: cloudops-dev
+spec:
+  selector:
+    app: task-service
+  ports:
+    - port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: cloudops-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-service
+  template:
+    metadata:
+      labels:
+        app: auth-service
+    spec:
+      containers:
+        - name: auth-service
+          image: us-central1-docker.pkg.dev/YOUR_PROJECT/cloudops/auth-service:latest
+          ports:
+            - containerPort: 8082
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cloudops-jwt
+                  key: JWT_SECRET
+          readinessProbe:
+            tcpSocket:
+              port: 8082
+          livenessProbe:
+            tcpSocket:
+              port: 8082
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: cloudops-dev
+spec:
+  selector:
+    app: auth-service
+  ports:
+    - port: 8082
+      targetPort: 8082
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-service
+  namespace: cloudops-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: analytics-service
+  template:
+    metadata:
+      labels:
+        app: analytics-service
+    spec:
+      containers:
+        - name: analytics-service
+          image: us-central1-docker.pkg.dev/YOUR_PROJECT/cloudops/analytics-service:latest
+          ports:
+            - containerPort: 8083
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: gcp
+            - name: GCP_PROJECT_ID
+              value: YOUR_PROJECT
+            - name: PUBSUB_SUBSCRIPTION_ANALYTICS
+              value: analytics-sub
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8083
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8083
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-service
+  namespace: cloudops-dev
+spec:
+  selector:
+    app: analytics-service
+  ports:
+    - port: 8083
+      targetPort: 8083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: cloudops-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+        - name: notification-service
+          image: us-central1-docker.pkg.dev/YOUR_PROJECT/cloudops/notification-service:latest
+          ports:
+            - containerPort: 8084
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: gcp
+            - name: GCP_PROJECT_ID
+              value: YOUR_PROJECT
+            - name: PUBSUB_SUBSCRIPTION_NOTIFICATION
+              value: notification-sub
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8084
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8084
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: cloudops-dev
+spec:
+  selector:
+    app: notification-service
+  ports:
+    - port: 8084
+      targetPort: 8084
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-service
+  namespace: cloudops-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gateway-service
+  template:
+    metadata:
+      labels:
+        app: gateway-service
+    spec:
+      containers:
+        - name: gateway-service
+          image: us-central1-docker.pkg.dev/YOUR_PROJECT/cloudops/gateway-service:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cloudops-jwt
+                  key: JWT_SECRET
+            - name: AUTH_SERVICE_URL
+              value: http://auth-service:8082
+            - name: TASK_SERVICE_URL
+              value: http://task-service:8081
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-service
+  namespace: cloudops-dev
+spec:
+  selector:
+    app: gateway-service
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gateway-service
+  namespace: cloudops-dev
+  annotations:
+    kubernetes.io/ingress.class: gce
+spec:
+  ingressClassName: gce
+  rules:
+    - host: gateway.dev.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-service
+                port:
+                  number: 8080

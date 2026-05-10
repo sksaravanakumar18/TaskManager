@@ -1,0 +1,216 @@
+name: Docker Build & Push
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'docker-compose.yml'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag (default: git SHA)'
+        required: false
+        default: ''
+
+env:
+  REGISTRY: ${{ vars.ARTIFACT_REGISTRY_HOST || 'us-central1-docker.pkg.dev' }}
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'your-gcp-project' }}
+  REPOSITORY: ${{ vars.AR_REPOSITORY || 'cloudops' }}
+
+jobs:
+  # ── Build shared-events library first ──────────────────────────────────────
+  build-shared:
+    name: Build shared-events
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Install shared-events to local Maven cache
+        run: mvn -f backend/shared-events/pom.xml clean install -DskipTests -q
+
+      - name: Cache shared-events JAR for downstream jobs
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.m2/repository/com/cloudops/shared-events
+          key: shared-events-${{ github.sha }}
+
+  # ── Run all service tests ──────────────────────────────────────────────────
+  test:
+    name: Test ${{ matrix.service }}
+    needs: build-shared
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - task-service
+          - auth-service
+          - gateway-service
+          - analytics-service
+          - notification-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Restore shared-events cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository/com/cloudops/shared-events
+          key: shared-events-${{ github.sha }}
+
+      - name: Run tests — ${{ matrix.service }}
+        run: mvn -f backend/${{ matrix.service }}/pom.xml test -q
+
+  # ── Build & push Docker images ─────────────────────────────────────────────
+  docker:
+    name: Docker — ${{ matrix.service }}
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # Workload Identity Federation
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: task-service
+            port: 8081
+          - service: auth-service
+            port: 8082
+          - service: gateway-service
+            port: 8080
+          - service: analytics-service
+            port: 8083
+          - service: notification-service
+            port: 8084
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Restore shared-events cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository/com/cloudops/shared-events
+          key: shared-events-${{ github.sha }}
+
+      - name: Compute image tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_SHA::8}"; fi
+          echo "value=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $TAG"
+
+      - name: Authenticate to GCP via Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push — ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: backend/${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:${{ steps.tag.outputs.value }}
+            ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_SHA=${{ github.sha }}
+
+      - name: Image digest summary
+        run: |
+          echo "### Docker image pushed :whale:" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** \`${{ matrix.service }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Tag:** \`${{ steps.tag.outputs.value }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Registry:** \`${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # ── Update Cloud Run on main ───────────────────────────────────────────────
+  deploy-cloudrun:
+    name: Deploy to Cloud Run (dev)
+    needs: docker
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: dev
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: task-service
+            cloudrun_name: task-service
+          - service: auth-service
+            cloudrun_name: auth-service
+          - service: gateway-service
+            cloudrun_name: gateway-service
+          - service: analytics-service
+            cloudrun_name: analytics-service
+          - service: notification-service
+            cloudrun_name: notification-service
+
+    steps:
+      - name: Compute image tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_SHA::8}"; fi
+          echo "value=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Deploy ${{ matrix.cloudrun_name }} to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ matrix.cloudrun_name }}
+          image: ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/${{ matrix.service }}:${{ steps.tag.outputs.value }}
+          region: ${{ vars.GCP_REGION || 'us-central1' }}
+
+      - name: Cloud Run URL summary
+        run: |
+          echo "### Cloud Run deployment :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** \`${{ matrix.cloudrun_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image tag:** \`${{ steps.tag.outputs.value }}\`" >> $GITHUB_STEP_SUMMARY

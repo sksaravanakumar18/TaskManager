@@ -1,0 +1,12 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: auth-service
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:cloudops-playground-local-secret-key-change-me-1234567890}
+    issuer: cloudops-playground
+    expiration-minutes: 60

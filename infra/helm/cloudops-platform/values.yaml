@@ -1,0 +1,129 @@
+namespaceOverride: cloudops
+
+namespace:
+  create: false
+
+imageDefaults:
+  registry: us-central1-docker.pkg.dev/your-gcp-project/cloudops
+  tag: latest
+  pullPolicy: IfNotPresent
+
+jwt:
+  createSecret: true
+  existingSecretName: ""
+  existingSecretKey: JWT_SECRET
+  value: cloudops-playground-local-secret-key-change-me-1234567890
+
+ingress:
+  enabled: false
+  className: gce
+  annotations: {}
+  host: cloudops.local
+  path: /
+  tls: []
+
+redis:
+  enabled: false
+  image: redis:7-alpine
+  port: 6379
+  storage:
+    enabled: false
+    size: 1Gi
+
+pubsubEmulator:
+  enabled: false
+  image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
+  port: 8085
+  projectId: local-project
+
+services:
+  auth-service:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: auth-service
+    port: 8082
+    serviceType: ClusterIP
+    serviceAccount:
+      create: true
+      annotations: {}
+    springProfiles: ""
+    probes:
+      type: tcp
+    env:
+      SECURITY_JWT_ISSUER: cloudops-playground
+      SECURITY_JWT_EXPIRATION_MINUTES: "60"
+    resources: {}
+
+  gateway-service:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: gateway-service
+    port: 8080
+    serviceType: ClusterIP
+    serviceAccount:
+      create: true
+      annotations: {}
+    springProfiles: ""
+    probes:
+      type: tcp
+    env: {}
+    resources: {}
+
+  task-service:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: task-service
+    port: 8081
+    serviceType: ClusterIP
+    serviceAccount:
+      create: true
+      annotations: {}
+    springProfiles: gcp
+    probes:
+      type: http
+      path: /actuator/health
+    env:
+      GCP_PROJECT_ID: local-project
+      PUBSUB_TOPIC_TASK_EVENTS: task-events
+    resources: {}
+
+  analytics-service:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: analytics-service
+    port: 8083
+    serviceType: ClusterIP
+    serviceAccount:
+      create: true
+      annotations: {}
+    springProfiles: gcp
+    probes:
+      type: http
+      path: /actuator/health
+    env:
+      GCP_PROJECT_ID: local-project
+      PUBSUB_SUBSCRIPTION_ANALYTICS: analytics-sub
+    resources: {}
+
+  notification-service:
+    enabled: true
+    replicaCount: 1
+    image:
+      repository: notification-service
+    port: 8084
+    serviceType: ClusterIP
+    serviceAccount:
+      create: true
+      annotations: {}
+    springProfiles: gcp
+    probes:
+      type: http
+      path: /actuator/health
+    env:
+      GCP_PROJECT_ID: local-project
+      PUBSUB_SUBSCRIPTION_NOTIFICATION: notification-sub
+    resources: {}

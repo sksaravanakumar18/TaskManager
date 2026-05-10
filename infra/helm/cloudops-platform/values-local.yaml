@@ -1,0 +1,33 @@
+namespaceOverride: cloudops-local
+
+jwt:
+  value: cloudops-playground-local-secret-key-change-me-1234567890
+
+redis:
+  enabled: true
+
+pubsubEmulator:
+  enabled: true
+  projectId: local-project
+
+ingress:
+  enabled: true
+  className: nginx
+  host: cloudops.localtest.me
+
+services:
+  task-service:
+    springProfiles: gcp,redis
+    env:
+      GCP_PROJECT_ID: local-project
+      PUBSUB_TOPIC_TASK_EVENTS: task-events
+
+  analytics-service:
+    env:
+      GCP_PROJECT_ID: local-project
+      PUBSUB_SUBSCRIPTION_ANALYTICS: analytics-sub
+
+  notification-service:
+    env:
+      GCP_PROJECT_ID: local-project
+      PUBSUB_SUBSCRIPTION_NOTIFICATION: notification-sub

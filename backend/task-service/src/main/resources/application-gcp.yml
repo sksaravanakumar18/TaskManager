@@ -1,0 +1,13 @@
+# Profile activated when running in GCP (Cloud Run) or against the local Pub/Sub emulator (docker-compose).
+# Set SPRING_PROFILES_ACTIVE=gcp to enable.
+
+spring:
+  cloud:
+    gcp:
+      project-id: ${GCP_PROJECT_ID:local-project}
+      pubsub:
+        emulator-host: ${PUBSUB_EMULATOR_HOST:}   # empty = use real GCP Pub/Sub
+
+pubsub:
+  topic:
+    task-events: ${PUBSUB_TOPIC_TASK_EVENTS:task-events}

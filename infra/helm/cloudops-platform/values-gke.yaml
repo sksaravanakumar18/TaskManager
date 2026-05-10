@@ -1,0 +1,54 @@
+namespaceOverride: cloudops-dev
+
+jwt:
+  createSecret: false
+  existingSecretName: cloudops-jwt
+  existingSecretKey: JWT_SECRET
+
+ingress:
+  enabled: true
+  className: gce
+  host: gateway.dev.example.com
+  annotations:
+    kubernetes.io/ingress.class: gce
+
+redis:
+  enabled: false
+
+pubsubEmulator:
+  enabled: false
+
+services:
+  auth-service:
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: auth-service@your-gcp-project.iam.gserviceaccount.com
+
+  gateway-service:
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: gateway-service@your-gcp-project.iam.gserviceaccount.com
+
+  task-service:
+    env:
+      GCP_PROJECT_ID: your-gcp-project
+      PUBSUB_TOPIC_TASK_EVENTS: task-events
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: task-service@your-gcp-project.iam.gserviceaccount.com
+
+  analytics-service:
+    env:
+      GCP_PROJECT_ID: your-gcp-project
+      PUBSUB_SUBSCRIPTION_ANALYTICS: analytics-sub
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: analytics-service@your-gcp-project.iam.gserviceaccount.com
+
+  notification-service:
+    env:
+      GCP_PROJECT_ID: your-gcp-project
+      PUBSUB_SUBSCRIPTION_NOTIFICATION: notification-sub
+    serviceAccount:
+      annotations:
+        iam.gke.io/gcp-service-account: notification-service@your-gcp-project.iam.gserviceaccount.com

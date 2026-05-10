@@ -1,0 +1,10 @@
+spring:
+  cloud:
+    gcp:
+      project-id: ${GCP_PROJECT_ID:local-project}
+      pubsub:
+        emulator-host: ${PUBSUB_EMULATOR_HOST:}
+
+pubsub:
+  subscription:
+    analytics: ${PUBSUB_SUBSCRIPTION_ANALYTICS:analytics-sub}

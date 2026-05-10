@@ -1,0 +1,107 @@
+{{- range $name, $config := .Values.services }}
+{{- if $config.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ include "cloudops-platform.namespace" $ }}
+  labels:
+    {{- include "cloudops-platform.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: {{ $config.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/part-of: cloudops-platform
+    spec:
+      serviceAccountName: {{ if $config.serviceAccount.create }}{{ $name }}{{ else }}default{{ end }}
+      {{- if and $.Values.pubsubEmulator.enabled (or (eq $name "task-service") (eq $name "analytics-service") (eq $name "notification-service")) }}
+      initContainers:
+        - name: wait-for-pubsub-bootstrap
+          image: curlimages/curl:8.8.0
+          command:
+            - sh
+            - -c
+            - >
+              until curl -sf http://pubsub-emulator:{{ $.Values.pubsubEmulator.port }}/v1/projects/{{ $.Values.pubsubEmulator.projectId }}/topics/task-events >/dev/null; do echo waiting for pubsub topic; sleep 3; done;
+              {{- if eq $name "analytics-service" }}
+              until curl -sf http://pubsub-emulator:{{ $.Values.pubsubEmulator.port }}/v1/projects/{{ $.Values.pubsubEmulator.projectId }}/subscriptions/analytics-sub >/dev/null; do echo waiting for analytics subscription; sleep 3; done;
+              {{- end }}
+              {{- if eq $name "notification-service" }}
+              until curl -sf http://pubsub-emulator:{{ $.Values.pubsubEmulator.port }}/v1/projects/{{ $.Values.pubsubEmulator.projectId }}/subscriptions/notification-sub >/dev/null; do echo waiting for notification subscription; sleep 3; done;
+              {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ printf "%s/%s:%s" $.Values.imageDefaults.registry $config.image.repository $.Values.imageDefaults.tag }}
+          imagePullPolicy: {{ $.Values.imageDefaults.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ $config.port }}
+          env:
+            {{- if $config.springProfiles }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: {{ $config.springProfiles | quote }}
+            {{- end }}
+            {{- if or (eq $name "auth-service") (eq $name "gateway-service") }}
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ if $.Values.jwt.existingSecretName }}{{ $.Values.jwt.existingSecretName }}{{ else }}cloudops-jwt{{ end }}
+                  key: {{ $.Values.jwt.existingSecretKey }}
+            {{- end }}
+            {{- if eq $name "gateway-service" }}
+            - name: AUTH_SERVICE_URL
+              value: http://auth-service:{{ (index $.Values.services "auth-service").port }}
+            - name: TASK_SERVICE_URL
+              value: http://task-service:{{ (index $.Values.services "task-service").port }}
+            {{- end }}
+            {{- if and (eq $name "task-service") $.Values.redis.enabled }}
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: {{ $.Values.redis.port | quote }}
+            {{- end }}
+            {{- if and (or (eq $name "task-service") (eq $name "analytics-service") (eq $name "notification-service")) $.Values.pubsubEmulator.enabled }}
+            - name: PUBSUB_EMULATOR_HOST
+              value: pubsub-emulator:{{ $.Values.pubsubEmulator.port }}
+            {{- end }}
+            {{- range $envName, $envValue := $config.env }}
+            - name: {{ $envName }}
+              value: {{ $envValue | quote }}
+            {{- end }}
+          {{- if eq $config.probes.type "http" }}
+          readinessProbe:
+            httpGet:
+              path: {{ default "/actuator/health" $config.probes.path }}
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: {{ default "/actuator/health" $config.probes.path }}
+              port: http
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          {{- else }}
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          {{- end }}
+          resources:
+            {{- toYaml $config.resources | nindent 12 }}
+{{- end }}
+{{- end }}

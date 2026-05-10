@@ -1,0 +1,17 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-service
+  cloud:
+    gateway:
+      routes:
+        - id: task-service
+          uri: ${TASK_SERVICE_URL:http://localhost:8081}
+          predicates:
+            - Path=/api/tasks/**
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:cloudops-playground-local-secret-key-change-me-1234567890}
