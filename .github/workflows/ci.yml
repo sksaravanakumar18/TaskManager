@@ -12,10 +12,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [auth-service, gateway-service, task-service]
+        service: [auth-service, gateway-service, task-service, analytics-service, notification-service]
     defaults:
       run:
-        working-directory: backend/${{ matrix.service }}
+        working-directory: backend
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,4 +28,4 @@ jobs:
           cache: maven
 
       - name: Test ${{ matrix.service }}
-        run: mvn -B test
+        run: mvn -B test -pl ${{ matrix.service }}
